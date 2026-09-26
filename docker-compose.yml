@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: paschen
+      POSTGRES_PASSWORD: paschen
+      POSTGRES_DB: paschen
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paschen -d paschen"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PASCHEN_DATABASE_URL: postgresql+asyncpg://paschen:paschen@db:5432/paschen
+      PASCHEN_PERSIST_ENABLED: "true"
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:
