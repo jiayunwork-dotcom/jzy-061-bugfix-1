@@ -140,6 +140,37 @@ async def test_scan_u_shape_minimum_and_unbreakable_marks(client):
     assert isinstance(data["record_id"], int)
 
 
+async def test_scan_left_only_window_observed_minimum_non_empty(client):
+    """回归：扫描窗口整段压在理论最小点左侧（左支、窗口内单调下降），
+    且每点都可击穿时，接口必须报出观测最小而非两个空字段；
+    值必须等于逐点数据里的真实最小。"""
+    ac, _ = client
+    A, B, g = AIR_EXAMPLE.a, AIR_EXAMPLE.b, AIR_EXAMPLE.gamma
+    pd_tip = math.log1p(1 / g) / A
+    pd_min = math.e * math.log1p(1 / g) / A
+    pd_start, pd_end = 0.5, 1.0
+    assert pd_tip < pd_start < pd_end < pd_min
+    r = await ac.post("/api/v1/scan", json={
+        "A": A, "B": B, "gamma": g,
+        "pd_start": pd_start, "pd_end": pd_end,
+        "num_points": 121, "persist": False})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["num_unbreakable"] == 0
+    assert data["num_breakable"] == 121
+    assert all(p["branch"] == "left" for p in data["points"])
+    assert data["observed_minimum_pd"] is not None
+    assert data["observed_minimum_vs"] is not None
+    good = data["points"]
+    true_min = min(good, key=lambda p: p["breakdown_voltage"])
+    assert data["observed_minimum_vs"] == pytest.approx(
+        true_min["breakdown_voltage"], rel=1e-15)
+    assert data["observed_minimum_pd"] == pytest.approx(
+        true_min["pd"], rel=1e-15)
+    # 窗口内一路下降：观测最小落在最右端采样点。
+    assert data["observed_minimum_pd"] == pytest.approx(pd_end, abs=1e-12)
+
+
 async def test_scan_rejects_bad_range(client):
     ac, _ = client
     r = await ac.post("/api/v1/scan", json={

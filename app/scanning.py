@@ -97,8 +97,12 @@ def scan_curve(
                 breakdown_voltage=result.breakdown_voltage,
                 reason=None,
             )
-            if result.branch is not Branch.LEFT and (
-                observed_min_vs is None or result.breakdown_voltage < observed_min_vs
+            # 观测最小取窗口内全部可击穿采样点的真实最小：左支、右支、
+            # 最小点一视同仁。窗口整段压在左支（曲线在窗口内单调下降）时
+            # 最小值在区间右端，绝不能因支别而漏统计。
+            if (
+                observed_min_vs is None
+                or result.breakdown_voltage < observed_min_vs
             ):
                 observed_min_vs = result.breakdown_voltage
                 observed_min_pd = pd_i

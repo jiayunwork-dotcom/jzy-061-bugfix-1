@@ -169,6 +169,48 @@ def test_scan_realtime_and_minimum_within_window():
     assert all(x < y for x, y in zip(right_v, right_v[1:]))
 
 
+def test_scan_left_only_window_reports_observed_minimum():
+    """回归：整段窗口压在理论最小点左侧（左支，窗口内单调下降）时，
+    观测最小也必须非空，并等于逐点可击穿结果里的真实最小——
+    绝不能因为采样点全在左支就把它们排除在取最小值统计之外。"""
+    pd_tip = secondary_emission_log(AIR_EXAMPLE.gamma) / AIR_EXAMPLE.a
+    m = paschen_minimum(**AIR)
+    # 两端都高于自持放电临界阈值、又都严格小于 pd_min：每点都可击穿，
+    # 且整段在左支（空气系数下 pd_tip≈0.410、pd_min≈1.115）。
+    pd_start, pd_end = 0.5, 1.0
+    assert pd_tip < pd_start < pd_end < m.pd_min
+    scan = scan_curve(AIR_EXAMPLE.a, AIR_EXAMPLE.b, AIR_EXAMPLE.gamma,
+                      pd_start, pd_end, 121)
+    good = [p for p in scan.points if p.breakable]
+    assert len(good) == 121
+    assert all(p.branch == "left" for p in good)
+    # 左支随 pd 增大严格下降：逐点数据本身是正常的。
+    voltages = [p.breakdown_voltage for p in good]
+    assert all(x > y for x, y in zip(voltages, voltages[1:]))
+
+    # 修复前这里两个字段都是 None；现在必须如实报出区间内的真实最小。
+    assert scan.observed_minimum_pd is not None
+    assert scan.observed_minimum_vs is not None
+    true_min = min(good, key=lambda p: p.breakdown_voltage)
+    assert scan.observed_minimum_vs == pytest.approx(
+        true_min.breakdown_voltage, rel=1e-15)
+    assert scan.observed_minimum_pd == pytest.approx(true_min.pd, rel=1e-15)
+    # 单调下降窗口里的最小就是最右端采样点。
+    assert scan.observed_minimum_pd == pytest.approx(pd_end, abs=1e-12)
+    assert good[-1].breakdown_voltage == pytest.approx(
+        scan.observed_minimum_vs, rel=1e-15)
+
+    # 右支窗口（曲线一路上升）的既有行为必须原样保持：最小在最左端。
+    scan_right = scan_curve(AIR_EXAMPLE.a, AIR_EXAMPLE.b, AIR_EXAMPLE.gamma,
+                            m.pd_min * 1.2, m.pd_min * 3.0, 121)
+    right_good = [p for p in scan_right.points if p.breakable]
+    assert all(p.branch == "right" for p in right_good)
+    assert scan_right.observed_minimum_pd == pytest.approx(
+        right_good[0].pd, rel=1e-15)
+    assert scan_right.observed_minimum_vs == pytest.approx(
+        right_good[0].breakdown_voltage, rel=1e-15)
+
+
 def test_scan_marks_unbreakable_points_instead_of_skipping():
     """扫描区间覆盖非法域时，非法点标记 breakable=False 并带原因，不跳过。"""
     pd_tip = secondary_emission_log(AIR_EXAMPLE.gamma) / AIR_EXAMPLE.a
