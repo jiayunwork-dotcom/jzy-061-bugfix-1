@@ -99,6 +99,61 @@ def test_gamma_effect_holds_across_whole_curve():
            paschen_minimum(AIR_EXAMPLE.a, AIR_EXAMPLE.b, g_low).pd_min
 
 
+def test_scan_observed_minimum_present_for_any_window_side():
+    """窗口落在曲线任意一侧，只要区间内有可击穿采样点，观测最小电压就必须
+    非空，且恰好等于逐点结果里的真实最小（位置也对得上）。
+
+    回归：整段窗口压在 pd_min 左侧（曲线在窗口内一路下行）时，观测最小曾被
+    错误地整体排除、两个字段都返回 None。跨过最小点、整段在右侧的既有行为
+    一并钉住。
+    """
+    m = paschen_minimum(**AIR)
+    pd_tip = secondary_emission_log(AIR_EXAMPLE.gamma) / AIR_EXAMPLE.a
+    # (起点系数, 终点系数)：左窗口（两端都在 pd_min 左侧且高于自持放电
+    # 临界 pd_tip）、跨最小点窗口、右窗口（整段在 pd_min 右侧）。
+    windows = [
+        (pd_tip * 1.05, m.pd_min * 0.9),
+        (m.pd_min * 0.5, m.pd_min * 2.0),
+        (m.pd_min * 1.1, m.pd_min * 3.0),
+    ]
+    for start, end in windows:
+        scan = scan_curve(AIR_EXAMPLE.a, AIR_EXAMPLE.b, AIR_EXAMPLE.gamma,
+                          start, end, 81)
+        good = [p for p in scan.points if p.breakable]
+        assert good, (start, end)
+        assert all(p.breakdown_voltage is not None for p in good)
+
+        # 核心不变量：有可击穿点 => 观测最小非空，且等于逐点真实最小。
+        assert scan.observed_minimum_vs is not None, (start, end)
+        assert scan.observed_minimum_pd is not None, (start, end)
+        true_min = min(p.breakdown_voltage for p in good)
+        assert scan.observed_minimum_vs == pytest.approx(true_min)
+        assert scan.observed_minimum_vs >= m.breakdown_voltage_min
+
+        # 位置必须是真实最小点所在的 pd（同一 pd 只采样一次）。
+        winners = [p for p in good
+                   if p.breakdown_voltage == pytest.approx(true_min)]
+        assert len(winners) == 1
+        assert scan.observed_minimum_pd == pytest.approx(winners[0].pd)
+
+    # 左窗口专项：曲线在窗口内单调下降，最小击穿电压落在最右端采样点。
+    left = scan_curve(AIR_EXAMPLE.a, AIR_EXAMPLE.b, AIR_EXAMPLE.gamma,
+                      pd_tip * 1.05, m.pd_min * 0.9, 81)
+    assert all(p.branch == "left" for p in left.points)
+    left_v = [p.breakdown_voltage for p in left.points]
+    assert all(x > y for x, y in zip(left_v, left_v[1:]))
+    assert left.observed_minimum_pd == pytest.approx(left.points[-1].pd)
+    assert left.observed_minimum_vs == pytest.approx(left_v[-1])
+
+    # 右窗口专项：曲线在窗口内单调上升，最小落在最左端采样点。
+    right = scan_curve(AIR_EXAMPLE.a, AIR_EXAMPLE.b, AIR_EXAMPLE.gamma,
+                       m.pd_min * 1.1, m.pd_min * 3.0, 81)
+    right_v = [p.breakdown_voltage for p in right.points]
+    assert all(x < y for x, y in zip(right_v, right_v[1:]))
+    assert right.observed_minimum_pd == pytest.approx(right.points[0].pd)
+    assert right.observed_minimum_vs == pytest.approx(right_v[0])
+
+
 def test_scan_all_unbreakable_window_has_none_observed_minimum():
     """整段窗口都在非法域：观测最小为 None、每点带原因，端点不丢。"""
     pd_tip = secondary_emission_log(AIR_EXAMPLE.gamma) / AIR_EXAMPLE.a

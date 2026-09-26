@@ -97,9 +97,11 @@ def scan_curve(
                 breakdown_voltage=result.breakdown_voltage,
                 reason=None,
             )
-            if result.branch is not Branch.LEFT and (
-                observed_min_vs is None or result.breakdown_voltage < observed_min_vs
-            ):
+            # 统计的是本次扫描"实际观测到"的最小击穿电压：凡可击穿的采样点
+            # 都参与比较，与它位于左支/右支无关。左支上 pd 越接近 pd_min、
+            # Vs 越低——整段窗口压在 pd_min 左侧时，最小电压出现在最右端点，
+            # 不能因为没覆盖到理论最小点就把整段排除。
+            if observed_min_vs is None or result.breakdown_voltage < observed_min_vs:
                 observed_min_vs = result.breakdown_voltage
                 observed_min_pd = pd_i
         except PaschenDomainError as exc:
